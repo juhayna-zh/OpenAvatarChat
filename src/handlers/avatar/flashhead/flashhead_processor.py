@@ -1,3 +1,6 @@
+# Modified from the upstream OpenAvatarChat original by Haina Zhu (2026).
+# Change: added the `idle_inference` option; default behaviour is unchanged.
+# Licensed under the Apache License 2.0, same as the original file.
 """
 FlashHead streaming processor for per-session audio buffering and inference.
 
@@ -57,12 +60,14 @@ class FlashHeadProcessor:
         infer_params: dict,
         output_audio_sample_rate: int = 24000,
         idle_noise_amplitude: float = 0.003,
+        idle_inference: bool = True,  # [fork]
         callbacks: Optional[FlashHeadProcessorCallbacks] = None,
     ):
         self.pipeline = pipeline
         self.infer_params = infer_params
         self.callbacks = callbacks
         self._idle_noise_amplitude = idle_noise_amplitude
+        self._idle_inference = idle_inference  # [fork]
         self._breath_phase = 0.0
 
         # Key inference parameters
@@ -134,12 +139,15 @@ class FlashHeadProcessor:
         self._collector_thread = threading.Thread(
             target=self._frame_collector_worker, daemon=True, name="FlashHead-FrameCollector",
         )
-        self._idle_thread = threading.Thread(
-            target=self._idle_inference_worker, daemon=True, name="FlashHead-IdleInference",
-        )
         self._collector_thread.start()
-        self._idle_thread.start()
-        logger.info("FlashHead: frame collector and idle inference threads started")
+        if self._idle_inference:  # [fork]
+            self._idle_thread = threading.Thread(
+                target=self._idle_inference_worker, daemon=True, name="FlashHead-IdleInference",
+            )
+            self._idle_thread.start()
+            logger.info("FlashHead: frame collector and idle inference threads started")
+        else:
+            logger.info("FlashHead: frame collector started (idle inference disabled)")
 
     def add_audio(self, audio_data_16k: np.ndarray, original_audio: np.ndarray,
                   speech_id: str, end_of_speech: bool):

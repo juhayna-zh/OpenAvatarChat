@@ -1,3 +1,6 @@
+# Modified from the upstream OpenAvatarChat original by Haina Zhu (2026).
+# Change: added the `idle_inference` option; default behaviour is unchanged.
+# Licensed under the Apache License 2.0, same as the original file.
 from pydantic import BaseModel, Field
 from loguru import logger
 
@@ -52,6 +55,14 @@ class FlashHeadConfig(HandlerBaseConfigModel, BaseModel):
                     "to give wav2vec2 richer temporal structure. "
                     "~0.003 corresponds to ambient room tone (approx -50 dBFS). "
                     "Set to 0.0 to use pure silence.",
+    )
+    idle_inference: bool = Field(  # [fork]
+        default=True,
+        description="Run background inference on ambient noise while nobody is "
+                    "speaking, so the avatar keeps breathing. Disable it to keep "
+                    "the GPU and the inference lock free for speech; between "
+                    "utterances the avatar falls back to the static reference "
+                    "frame.",
     )
     debug: bool = Field(default=False, description="Enable debug logging.")
     # concurrent_limit is inherited from HandlerBaseConfigModel and auto-injected by ChatEngine

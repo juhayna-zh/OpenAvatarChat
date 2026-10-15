@@ -1,3 +1,6 @@
+# Modified from the upstream OpenAvatarChat original by Haina Zhu (2026).
+# Change: added the `idle_inference` option; default behaviour is unchanged.
+# Licensed under the Apache License 2.0, same as the original file.
 """
 FlashHead Avatar Handler for OpenAvatarChat.
 
@@ -295,6 +298,7 @@ class HandlerAvatarFlashHead(HandlerBase):
             infer_params=copy.deepcopy(self.infer_params),
             output_audio_sample_rate=handler_config.output_audio_sample_rate,
             idle_noise_amplitude=handler_config.idle_noise_amplitude,
+            idle_inference=handler_config.idle_inference,  # [fork]
         )
 
         context = FlashHeadContext(
