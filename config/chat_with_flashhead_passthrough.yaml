@@ -1,0 +1,46 @@
+default:
+  logger:
+    log_level: "INFO"
+  service:
+    # 无鉴权端口，必须只绑本机。8284 = 透传渲染服务，与 8282(LiteAvatar 全链路)、
+    # 8283(FlashHead 全链路) 并存。
+    host: "127.0.0.1"
+    port: 8284
+    cert_file: "ssl_certs/localhost.crt"
+    cert_key: "ssl_certs/localhost.key"
+  chat_engine:
+    model_root: "models"
+    concurrent_limit: 1
+    handler_search_path:
+      - "src/handlers"
+    handler_configs:
+      WsVideoClient:
+        module: client/ws_video_client/ws_video_client_handler
+        connection_ttl: 900
+        jpeg_quality: 85
+        video_fps: 25
+      InterruptHandler:
+        module: logic/interrupt/interrupt_handler
+      # 把上行音频原样转成 AVATAR_AUDIO：没有 VAD/ASR/LLM/TTS。
+      # 调用方自己持有对话与 TTS，这里只做「说话声 -> 数字人视频」。
+      AudioPassthrough:
+        module: logic/audio_passthrough/passthrough_handler
+        # 上行音频会被重采样到这个速率再交给渲染器。
+        sample_rate: 24000
+        # 上行停包多久算一句话说完（秒）。也是句尾多出来的延迟。
+        gap_seconds: 0.4
+      FlashHead:
+        module: avatar/flashhead/avatar_handler_flashhead
+        ckpt_dir: "models/SoulX-FlashHead-1_3B"
+        wav2vec_dir: "models/wav2vec2-base-960h"
+        model_type: "lite"
+        cond_image_path: "resource/avatar/flashhead/girl.png"
+        fps: 25
+        base_seed: 42
+        use_face_crop: false
+        debug: false
+        idle_noise_amplitude: 0.003
+        # 关掉待机动画推理：它会在没人说话时持续占 GPU，而且整块持有
+        # _inference_lock，语音推理开头要等它 2~5 秒。关掉后静默期退化成
+        # 静态参考帧，DHAV 桥接只在轮次内发布媒体，本来也用不上待机帧。
+        idle_inference: false

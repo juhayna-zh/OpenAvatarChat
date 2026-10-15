@@ -1,0 +1,69 @@
+default:
+  logger:
+    log_level: "INFO"
+  service:
+    # 无鉴权端口，必须只绑本机；命令行 --host 可覆盖。
+    # 用 8283 是为了能和 8282 上的 LiteAvatar 服务并存、直接对比效果。
+    host: "127.0.0.1"
+    port: 8283
+    cert_file: "ssl_certs/localhost.crt"
+    cert_key: "ssl_certs/localhost.key"
+  chat_engine:
+    model_root: "models"
+    # 官方建议 FlashHead 单路（显存占用高）。本机 L20X 有 143G，确认稳定后可以往上调。
+    # 注意 FlashHead 与 LiteAvatar 的并发模型不同：它是 load() 里加载一次共享权重、
+    # 每 session 建一个 FlashHeadProcessor，不是 LiteAvatar 那种 worker 池。
+    concurrent_limit: 1
+    handler_search_path:
+      - "src/handlers"
+    handler_configs:
+      # 与 chat_with_openai_compatible_bailian_cosyvoice_flashhead.yaml 完全相同的
+      # 流水线，只把 RtcClient 换成 WsVideoClient：服务端渲染的画面改走 WebSocket
+      # 二进制帧（JVID/JPEG），而不是 WebRTC。上行协议与 ws_client 一致。
+      WsVideoClient:
+        module: client/ws_video_client/ws_video_client_handler
+        connection_ttl: 900
+        jpeg_quality: 85
+        video_fps: 25
+      InterruptHandler:
+        module: logic/interrupt/interrupt_handler
+      SileroVad:
+        module: vad/silerovad/vad_handler_silero
+        speaking_threshold: 0.5
+        start_delay: 2048
+        # 单位是「样本数」不是毫秒：16 kHz 下 5000 = 312 ms。
+        # 句中停顿超过这个值就会被断句，叠加上面的单工静音门会导致用户被抢话。
+        end_delay: 5000
+        buffer_look_back: 5000
+        speech_padding: 512
+      SenseVoice:
+        enabled: True
+        module: asr/sensevoice/asr_handler_sensevoice
+        model_name: "iic/SenseVoiceSmall"
+      CosyVoice:
+        enabled: True
+        module: tts/bailian_tts/tts_handler_cosyvoice_bailian
+        voice: "longxiaochun"
+        model_name: "cosyvoice-v1"
+        # api_key: "" # default=os.getenv("DASHSCOPE_API_KEY")
+      LLMOpenAICompatible:
+        enabled: True
+        module: llm/openai_compatible/llm_handler_openai_compatible
+        model_name: "qwen-plus"
+        enable_video_input: False
+        history_length: 20
+        system_prompt: "请你扮演一个 AI 助手，用简短的两三句对话来回答用户的问题，并在对话内容中加入合适的标点符号，不需要讨论标点符号相关的内容"
+        api_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        # api_key: "" # default=os.getenv("DASHSCOPE_API_KEY")
+      # === FlashHead 数字人 Avatar (Lite 模式) ===
+      FlashHead:
+        module: avatar/flashhead/avatar_handler_flashhead
+        ckpt_dir: "models/SoulX-FlashHead-1_3B"
+        wav2vec_dir: "models/wav2vec2-base-960h"
+        model_type: "lite"
+        cond_image_path: "resource/avatar/flashhead/girl.png"  # 换成任意正脸照片即可
+        fps: 25
+        base_seed: 42
+        use_face_crop: false
+        debug: false
+        idle_noise_amplitude: 0.003
