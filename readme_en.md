@@ -48,7 +48,7 @@
 
 ```bash
 # 1. Clone with submodules (every avatar implementation lives in a submodule)
-git clone --recursive <this repo's URL>
+git clone --recursive https://github.com/juhayna-zh/OpenAvatarChat.git
 cd OpenAvatarChat
 # If you already cloned it:
 git submodule update --init --recursive --depth 1

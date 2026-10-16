@@ -46,7 +46,7 @@
 
 ```bash
 # 1. 克隆并初始化 submodule（数字人实现都在 submodule 里）
-git clone --recursive <本仓库地址>
+git clone --recursive https://github.com/juhayna-zh/OpenAvatarChat.git
 cd OpenAvatarChat
 # 已经克隆过的话：
 git submodule update --init --recursive --depth 1
