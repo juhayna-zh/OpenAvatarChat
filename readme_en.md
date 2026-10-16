@@ -5,14 +5,12 @@
 </p>
 
 <p align="center">
-<strong>Turn audio into a talking face.</strong>
+<strong>TL;DR: a self-hosted digital-human API service for <a href="https://github.com/QwenAudio/qwen-audio-agent">Qwen-Audio-Agent</a>.</strong>
 </p>
 
-An **unofficial downstream fork** of [HumanAIGC-Engineering/OpenAvatarChat](https://github.com/HumanAIGC-Engineering/OpenAvatarChat). Not affiliated with, nor endorsed by, HumanAIGC-Engineering.
+An **unofficial downstream fork** of [HumanAIGC-Engineering/OpenAvatarChat](https://github.com/HumanAIGC-Engineering/OpenAvatarChat), with no affiliation to it.
 
-Upstream is a complete "speech → talking avatar" application. This fork adds a **rendering backend API that sits behind an external voice agent**: your agent keeps owning the conversation and the TTS, hands the reply's PCM audio to this service, and gets back audio and face video that are **already paired** (lip-synced), in real time. There is no VAD, ASR, LLM or TTS on this path — they all stay on your side.
-
-Upstream code is untouched apart from one `idle_inference` switch; everything added here is a self-contained module.
+On top of the original OpenAvatarChat, this fork adds a **rendering API that sits behind an external voice agent**: your agent (such as [qwen-audio-agent](https://github.com/QwenAudio/qwen-audio-agent)) keeps owning the conversation and the TTS, hands the reply's PCM audio to this service, and gets back audio and face video that are **already paired** (lip-synced), in real time. There is no VAD, ASR, LLM or TTS on this path — it only serves the digital-human API.
 
 ## Quick start
 
@@ -44,7 +42,7 @@ In a second shell, start the bridge and run the self-check:
 
 If it works, it prints `status ok`, `publish_rate_hz` ≈ 25 and `realtime_factor` ≈ 1.0, and `~/dhav-check/` contains `output.wav` and `frames/*.png` — ready to listen to and look at.
 
-Two pitfalls, up front:
+Two pitfalls to watch for:
 
 - **After installing, always use `.venv/bin/python`, never `uv run`** (the `uv run install.py` above is the one exception — that is the installer itself). `uv run` performs an implicit sync against the lockfile and **uninstalls** the handler dependencies that `install.py` put in via `uv pip install`, because they are not in the root `pyproject.toml`. The symptom is a handler silently missing, or an import error, on the next start.
 - **The certificate must carry SANs**, so do not use the bundled `scripts/create_ssl_certs.sh`: its `openssl req` has neither `-subj` nor `-addext`, so it blocks on interactive prompts and produces a certificate with no SANs, which always fails hostname verification.
@@ -64,19 +62,17 @@ The protocol, endpoints, authentication, turn lifecycle, measured numbers and al
 
 ## Which service should I use?
 
-All four ports need a GPU.
+All four ports need a GPU. For this project's main purpose — serving the digital-human API for [qwen-audio-agent](https://github.com/QwenAudio/qwen-audio-agent) — you only need `:18910` and `:8284`.
 
 | Port | What it is | DashScope key | Input → output | Docs |
 | --- | --- | --- | --- | --- |
 | **18910** | DHAV v1 renderer service, for an external agent gateway | not needed | PCM audio of the assistant's reply → paired I420 video + audio, 25 fps | [`dhav_bridge/README.md`](dhav_bridge/README.md) |
 | 8284 | Pure rendering passthrough; what 18910 sits on | not needed | `MIC_AUDIO` → `AVATAR_AUDIO` + `JVID` video frames | [`PROTOCOL.md`](src/handlers/client/ws_video_client/PROTOCOL.md) |
-| 8283 | Full conversation chain + FlashHead | **required** | Microphone / text → avatar video | upstream |
-| 8282 | Full conversation chain + LiteAvatar | **required** | Microphone / text → avatar video | upstream |
+| 8283 | Full conversation chain + FlashHead (kept for capability only; unrelated to this project's main purpose) | **required** | Microphone / text → avatar video | upstream |
+| 8282 | Full conversation chain + LiteAvatar (kept for capability only; unrelated to this project's main purpose) | **required** | Microphone / text → avatar video | upstream |
 
-Just want a rendering backend for an agent you already have → 18910. Want a ready-to-use voice-conversation avatar → 8282/8283: swap the config above for `chat_with_liteavatar_ws_video.yaml` or `chat_with_flashhead_ws_video.yaml` and `export DASHSCOPE_API_KEY=sk-...`.
+Of these, `:8284` has **no authentication at all** (no token, no Origin check, no allow-list), so keep it bound to `127.0.0.1` — the quick start above already does. To reach it from another machine, use an SSH tunnel rather than exposing it. Only `:18910` has Bearer-token auth.
 
-> [!WARNING]
-> `:8282` / `:8283` / `:8284` have **no authentication** — no token, no Origin check, no allow-list. Anyone who can reach the port can open a session and spend your DashScope quota. Keep them bound to `127.0.0.1`. Only `:18910` has Bearer-token auth.
 
 ## What this fork adds
 
@@ -93,7 +89,7 @@ Three knobs worth knowing about:
 - `AudioPassthrough.gap_seconds: 0.4` — how long an uplink pause counts as end-of-utterance; also the extra latency appended to every utterance. Splitting looks at **whether you stopped sending packets**, not at whether the audio content contains silence.
 - `service.concurrent_limit: 1` — FlashHead on a single GPU can only render one session at a time.
 
-## The only change to upstream code
+## Changes to upstream code
 
 3 files, `+28/−5` (9 of those lines are the change-notice comments), all under `src/handlers/avatar/flashhead/`, adding exactly one config option:
 
@@ -103,36 +99,23 @@ Three knobs worth knowing about:
 | `avatar_handler_flashhead.py` | Passes that value into `FlashHeadProcessor(...)` |
 | `flashhead_processor.py` | Creation and start of the idle-inference thread now gated on that switch |
 
-**The default `True` is upstream's original behaviour**, character for character: any config that does not set this key is unaffected, and only `chat_with_flashhead_passthrough.yaml` turns it off. All three files carry a change notice at the top as required by Apache-2.0 §4(b), and every modified hunk has a trailing `# [fork]` marker, so `git diff upstream/main` shows the whole story at a glance. Everything else added here is a purely additive, self-contained directory.
 
-## Tests
+<details>
+  <summary>Known pitfalls</summary>
 
-44 unit tests, needing neither a GPU nor a network (the renderer and both DHAV channels are stubbed):
-
-```bash
-.venv/bin/python -m pytest dhav_bridge -q
-```
-
-`test_dhav_bridge.py` pins the byte layout of the wire format, so a change to the codec fails immediately rather than leaving some gateway silently unable to connect.
-
-## Known pitfalls
 
 1. **The uplink is really 16 kHz, not the 24 kHz the protocol declares.** Upstream hardcodes the `MIC_AUDIO` sample rate to 16000 and ignores the declared value; the bridge resamples internally. **Send 24 kHz as the protocol says** and do not try to "fix" it — sending 16 kHz yourself yields speech 1.5× too fast and 1.5× too low in pitch.
 2. **The renderer's downlink is never quiet.** FlashHead's frame collector is a strict 25 fps metronome: with nothing to say it emits a still frame plus all-zero audio, until the session ends. So "how long since I last got data" can never detect end-of-utterance; the bridge relies on upstream's structural `ChatSignal stream_end` marker.
 3. **`GET /readiness` returning 200 does not mean video will come out.** It only reflects that handlers registered, not inference throughput. It keeps returning 200 while the renderer is wedged.
-4. **INFO-level logs print the DashScope key in plaintext** (handler registration dumps the fully resolved config). The passthrough config has no DashScope component so it does not matter there, but do not ship INFO logs from the full chain.
-5. **Rendering occasionally slows down** (0.38× realtime has been observed, and the video stutters). The cause is inside the renderer process; restarting `:8284` fixes it. The tell is `publish_rate_hz` (should be ≈25) and `max_unit_gap_s` from `smoke_client`.
+4. **Rendering occasionally slows down.** The cause is inside the renderer process; restarting `:8284` fixes it. The tell is `publish_rate_hz` (should be ≈25) and `max_unit_gap_s` from `smoke_client`.
 
 The rest are in [`dhav_bridge/README.md`](dhav_bridge/README.md#pitfalls) and [`PROTOCOL.md`](src/handlers/client/ws_video_client/PROTOCOL.md).
 
+</details>
+
+
+
 ## Upstream and licence
 
-Upstream project: <https://github.com/HumanAIGC-Engineering/OpenAvatarChat> (v0.6.0). The full conversation application, preset modes, component dependencies, documentation site and WeChat group all live there.
-
-This repository is distributed under **Apache-2.0** (see [`LICENSE`](LICENSE)).
-
-- Copyright in the upstream code remains with its original authors.
-- Copyright in what this fork adds (`dhav_bridge/`, `audio_passthrough/`, `ws_video_client/`, the 3 new configs) belongs to Haina Zhu, likewise distributed under Apache-2.0.
-- Changes to upstream files are limited to the 3 files under `src/handlers/avatar/flashhead/`, each carrying a change notice at the top as required by Apache-2.0 §4(b).
-
-This project is not affiliated with, nor endorsed by, HumanAIGC-Engineering. Apache-2.0 §6 grants no trademark rights; the name and marks "OpenAvatarChat" remain the property of their owner.
+Thanks to this repository's upstream project: <https://github.com/HumanAIGC-Engineering/OpenAvatarChat> (v0.6.0).
+This repository is distributed under **Apache-2.0** (see [`LICENSE`](LICENSE)); the name and marks "OpenAvatarChat" remain the property of the upstream project's owner.
